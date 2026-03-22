@@ -74,14 +74,24 @@ static inline int memcc_pow(uintptr_t value, uintptr_t mul) {
 /**
  * Align a pointer forward to the next multiple of `align`.
  * Align must be >0 and power-of-2.
+ * Returns NULL on invalid input.
  */
-static inline void *memcc_align_forward(void *ptr, size_t align) {
+static inline void *memcc_align_ptr(void *ptr, size_t align) {
     MEMCC_CHECK(ptr != NULL, NULL);
     MEMCC_CHECK(memcc_pow2(align), NULL);
 
     uintptr_t p = (uintptr_t)ptr;
     uintptr_t aligned = (p + (align - 1)) & ~(align - 1);
     return (void *)aligned;
+}
+/**
+ * Align a size forward to the next multiple of `align`.
+ * Align must be >0 and a power-of-2.
+ * Returns 0 on invalid input.
+ */
+static inline size_t memcc_align_size(size_t size, size_t align) {
+    MEMCC_CHECK(memcc_pow2(align), 0); // must be power of 2
+    return (size + (align - 1)) & ~(align - 1);
 }
 
 /**
