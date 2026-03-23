@@ -15,7 +15,6 @@ extern "C" {
 #endif
 
 
-
 /* ================================================================================ */
 /*  API RULES                                                                       */
 /* ================================================================================ */
@@ -27,17 +26,10 @@ extern "C" {
  * ├─ prefix
  * |  └─ memcc_                   : yes.
  * ├─ function suffix
- * |  ├─ {s,u}                    : thread safety level
- * |  |  ├─ s                      : thread-safe function
- * |  |  └─ u                      : unsafe (non-thread-safe) function
- * |  ├─ {o,f,m}                  : performance level
- * |  |  ├─ o                      : optimized (balanced optimization with checks)
- * |  |  ├─ f                      : fast (optimized for speed, minimal checks)
- * |  |  └─ m                      : minimal (low memory usage, fewer features)
- * |  ├─ {x,y,z}                  : feature level
- * |  |  ├─ x                      : experimental (early-stage, unstable features)
- * |  |  ├─ y                      : standard (stable, production-ready features)
- * |  |  └─ z                      : legacy (older, deprecated implementation)
+ * ├─ function suffix
+ * |  ├─ tb                     : thread-blocking
+ * |  ├─ ts                     : thread-safe
+ * |  ├─ tu                     : thread-unsafe
  * └─ type suffix
  *    └─ _t                       : yes, for type definitions
 */
@@ -85,7 +77,7 @@ extern "C" {
  * Check if a value is a power-of-2 (>0).
  * Returns 1 if true, 0 if false.
  */
-static inline int memcc_pow2_sfy(uintptr_t value) {
+static inline int memcc_pow2_ts(uintptr_t value) {
     return value != 0 && (value & (value - 1)) == 0;
 }
 
@@ -94,37 +86,37 @@ static inline int memcc_pow2_sfy(uintptr_t value) {
  * Returns 1 if true, 0 if false.
  * 'mul' must be a power of 2.
  */
-static inline int memcc_pow_sfy(uintptr_t value, size_t mul) {
-    MEMCC_CHECK(memcc_pow2_sfy(mul), 0); // must be power of 2
+static inline int memcc_pow_ts(uintptr_t value, size_t mul) {
+    MEMCC_CHECK(memcc_pow2_ts(mul), 0); // must be power of 2
     return (value & (mul - 1)) == 0;
 }
 
 /**
- * Align a pointer or size forward to the next multiple of `align`.
+ * Align a pointer or size UP to the next multiple of `align`.
+ * Returns the next multiple of `align` >= value.
  * `align` must be >0 and a power-of-2.
- * This function works for both pointers and sizes.
- * Returns NULL for invalid input (pointer) or 0 (size).
+ * Returns 0 for invalid input (size) or NULL (pointer).
  */
-static inline uintptr_t memcc_align_ceil_sfy(uintptr_t value, size_t align) {
-    MEMCC_CHECK(memcc_pow2_sfy(align), 0); // align must be power of 2
+static inline uintptr_t memcc_align_ceil_ts(uintptr_t value, size_t align) {
+    MEMCC_CHECK(memcc_pow2_ts(align), 0); // align must be power of 2
     return (value + (align - 1)) & ~(align - 1);
 }
 
 /**
- * Align a pointer or size backward to the previous multiple of `align`.
+ * Align a pointer or size DOWN to the previous multiple of `align`.
+ * Returns the last multiple of `align` <= value.
  * `align` must be >0 and a power-of-2.
- * This function works for both pointers and sizes.
- * Returns NULL for invalid input (pointer) or 0 (size).
+ * Returns 0 for invalid input (size) or NULL (pointer).
  */
-static inline uintptr_t memcc_align_floor_sfy(uintptr_t value, size_t align) {
-    MEMCC_CHECK(memcc_pow2_sfy(align), 0); // align must be power of 2
+static inline uintptr_t memcc_align_floor_ts(uintptr_t value, size_t align) {
+    MEMCC_CHECK(memcc_pow2_ts(align), 0); // align must be power of 2
     return value & ~(align - 1);
 }
 
 /**
  * Clamp value between min and max.
  */
-static inline size_t memcc_clamp_sfy(size_t value, size_t min, size_t max) {
+static inline size_t memcc_clamp_ts(size_t value, size_t min, size_t max) {
     const size_t t = value < min ? min : value;
     return t > max ? max : t;
 }
@@ -133,7 +125,7 @@ static inline size_t memcc_clamp_sfy(size_t value, size_t min, size_t max) {
  * Set memory to a specific byte value.
  * Optimized for GCC/Clang using __builtin_memset.
  */
-static inline void memcc_set_ufy(void *ptr, unsigned long value, size_t size) {
+static inline void memcc_set_tu(void *ptr, unsigned long value, size_t size) {
     MEMCC_CHECK(ptr != NULL, /*void*/);
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -146,8 +138,8 @@ static inline void memcc_set_ufy(void *ptr, unsigned long value, size_t size) {
 /**
  * Zero memory region.
  */
-static inline void memcc_zero_ufy(void *ptr, size_t size) {
-    memcc_set_ufy(ptr, 0, size);
+static inline void memcc_zero_tu(void *ptr, size_t size) {
+    memcc_set_tu(ptr, 0, size);
 }
 
 
@@ -155,15 +147,15 @@ static inline void memcc_zero_ufy(void *ptr, size_t size) {
 /*  INTERFACE ALIAS                                                                 */
 /* ================================================================================ */
 
-#define memcc_pow2(value)               memcc_pow2_sfy((uintptr_t)value)
-#define memcc_pow(value, mul)           memcc_pow_sfy((uintptr_t)value, (size_t)mul)
+#define memcc_pow2(value)               memcc_pow2_ts((uintptr_t)(value))
+#define memcc_pow(value, mul)           memcc_pow_ts((uintptr_t)(value), (size_t)(mul))
 
-#define memcc_align_ceil(value, align)  memcc_align_ceil_sfy((uintptr_t)value, (size_t)align)
-#define memcc_align_floor(value, align) memcc_align_floor_sfy((uintptr_t)value, (size_t)align)
+#define memcc_align_ceil(value, align)  memcc_align_ceil_ts((uintptr_t)(value), (size_t)(align))
+#define memcc_align_floor(value, align) memcc_align_floor_ts((uintptr_t)(value), (size_t)(align))
 
-#define memcc_clamp(value, min, max)    memcc_clamp_sfy((size_t)value, (size_t)min, (size_t)max)
-#define memcc_set(ptr, value, size)     memcc_set_ufy((void *)ptr, (unsigned long)value, (size_t)size)
-#define memcc_zero(ptr, size)           memcc_zero_ufy((void *)ptr, (size_t)size)
+#define memcc_clamp(value, min, max)    memcc_clamp_ts((size_t)(value), (size_t)(min), (size_t)(max))
+#define memcc_set(ptr, value, size)     memcc_set_tu((void *)(ptr), (unsigned long)(value), (size_t)(size))
+#define memcc_zero(ptr, size)           memcc_zero_tu((void *)(ptr), (size_t)(size))
 
 
 #ifdef __cplusplus
