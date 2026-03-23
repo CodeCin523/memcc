@@ -1,8 +1,13 @@
 add_executable(
-    unit_memcc_sbblock
-    sbblock.c
+    unit_memcc_dfstack
+    dfstack.c
 )
 target_link_libraries(
-    unit_memcc_sbblock PRIVATE
+    unit_memcc_dfstack PRIVATE
     memcc::memcc
+)
+target_compile_definitions(unit_memcc_dfstack PRIVATE
+    MEMCC_DEBUG
+    MEMCC_ZERO_ON_ALLOC
+    MEMCC_ZERO_ON_FREE
 )

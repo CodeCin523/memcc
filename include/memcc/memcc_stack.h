@@ -7,6 +7,7 @@ extern "C" {
 
 
 #include "memcc.h"
+
 #include <stdalign.h>
 
 
@@ -17,15 +18,15 @@ extern "C" {
 #define MEMCC_DFSTACK_FLAGS (0x80000000u)
 #define MEMCC_DFSTACK_VALUE (0x7FFFFFFFu)
 
-alignas(uint64_t) struct memcc_dfmeta {
-    uint32_t lcount; // distance in bytes to previous meta & flag collapse
-    uint32_t ncount; // distance in bytes to next meta
+struct memcc_dfmeta {
+    uint32_t lcount; // distance in sizeof(memcc_dfmeta) to previous meta & flag collapse
+    uint32_t ncount; // distance in sizeof(memcc_dfmeta) to next meta
 };
 
 typedef struct memcc_dfstack {
-    uint64_t *pool; // start of memory
-    uint64_t *last; // points to current top meta
-    uint32_t count; // total count of uint64_t in pool
+    uint8_t *pool;  // start of memory
+    uint8_t *last;  // points to current top meta
+    uint32_t size;  // total byte count in pool
 } memcc_dfstack_t;
 
 
@@ -33,52 +34,50 @@ typedef struct memcc_dfstack {
 /*  DEFERRED_STACK                                                                  */
 /* ================================================================================ */
 
-static inline void memcc_setup_dfstack(memcc_dfstack_t *dfstack, void *pool, size_t size) {
+static inline void memcc_setup_dfstack_sfy(memcc_dfstack_t *dfstack, void *pool, size_t size) {
     MEMCC_CHECK(dfstack && pool && size > 0, /*void*/);
 
-    dfstack->pool = (uint64_t *) memcc_align_ptr(pool, alignof(uint64_t));
+    dfstack->pool = (uint8_t *) memcc_align_ceil(pool, alignof(max_align_t));
     dfstack->last = dfstack->pool;
 
-    // not the best, really not the best, but get the count of element
-    size_t aligned_size = size - ((uintptr_t)dfstack->pool - (uintptr_t)pool);
-    dfstack->count = aligned_size / sizeof(uint64_t);
+    // get size, ajust with moved pool
+    dfstack->size = size - ((uintptr_t)dfstack->pool - (uintptr_t)pool);
 
-    MEMCC_ZERO_ALLOC(dfstack->pool, dfstack->count);
+    MEMCC_ZERO_ALLOC(dfstack->pool, dfstack->size);
 
-    // makes lots of sense if zero_alloc is disabled
+#ifndef MEMCC_ZERO_ON_ALLOC
     struct memcc_dfmeta *meta = (struct memcc_dfmeta *)dfstack->last;
     meta->lcount = 0;
     meta->ncount = 0;
+#endif
 }
-static inline void memcc_teardown_dfstack(memcc_dfstack_t *dfstack) {
+static inline void memcc_teardown_dfstack_ufy(memcc_dfstack_t *dfstack) {
     MEMCC_CHECK(dfstack, /*void*/);
 
     dfstack->pool = NULL;
     dfstack->last = NULL;
-    dfstack->count = 0;
+    dfstack->size = 0;
 }
 
-static inline void *memcc_dfstack_push(memcc_dfstack_t *dfstack, uint32_t size, uint32_t align) {
+static inline void *memcc_dfstack_push_ufy(memcc_dfstack_t *dfstack, uint32_t size, uint32_t align) {
     MEMCC_CHECK(dfstack && memcc_pow2(align), NULL);
 
     // calculate payload, span and next
-    uint64_t *payload_base = dfstack->last + 1;
-    uint64_t *payload = memcc_align_ptr(payload_base, align);
+    uint8_t *payload = (uint8_t *) memcc_align_floor(
+        dfstack->last + sizeof(struct memcc_dfmeta),
+        align
+    );
 
-    // not optimal at all
-    uint32_t pad = ((uintptr_t)payload - (uintptr_t)payload_base);
-    uint32_t span = (pad + size + 7) / sizeof(uint64_t);
+    // where is next
+    struct memcc_dfmeta *next = (struct memcc_dfmeta *) memcc_align_ceil(payload + size, alignof(struct memcc_dfmeta));
+    // where are lasts
+    struct memcc_dfmeta *olast = (struct memcc_dfmeta *) dfstack->last;
+    struct memcc_dfmeta *nlast = (struct memcc_dfmeta *) memcc_align_floor(payload - 1, alignof(struct memcc_dfmeta));
 
-    // technically the memcc_align_ptr is not needed, as it is an emergent behavior from the algorithm
-    struct memcc_dfmeta *next = memcc_align_ptr(payload + span, sizeof(uint64_t));
 
     // Bounds check
-    if((uint32_t)( next - (struct memcc_dfmeta *)dfstack->pool ) + 1 > dfstack->count)
+    if((uint8_t *)(next + 1) - dfstack->pool > dfstack->size)
         return NULL;
-
-    // Move the last to new position
-    struct memcc_dfmeta *olast = (struct memcc_dfmeta *)dfstack->last;
-    struct memcc_dfmeta *nlast = (struct memcc_dfmeta *)(payload-1);
 
     if(olast != nlast) {
         // tell the pair that we have moved.
@@ -95,21 +94,13 @@ static inline void *memcc_dfstack_push(memcc_dfstack_t *dfstack, uint32_t size, 
     next->lcount = nlast->ncount;
     next->ncount = 0;
 
-    MEMCC_ZERO_ALLOC(nlast + 1, nlast->ncount-1);
+    MEMCC_ZERO_ALLOC((nlast+1), (nlast->ncount-1)*sizeof(struct memcc_dfmeta));
 
-    dfstack->last = (uint64_t *)next;
+    dfstack->last = (uint8_t *)next;
     return payload;
 }
-static inline void *memcc_dfstack_top(memcc_dfstack_t *dfstack) {
-    MEMCC_CHECK(dfstack && dfstack->pool != dfstack->last, NULL);
 
-    struct memcc_dfmeta *foot = (struct memcc_dfmeta *)dfstack->last;
-    struct memcc_dfmeta *head = foot - (foot->lcount & MEMCC_DFSTACK_VALUE);
-    
-    return (void *)head + 1;
-}
-
-static inline void memcc_dfstack_pop(memcc_dfstack_t *dfstack, void *addr) {
+static inline void memcc_dfstack_pop_umx(memcc_dfstack_t *dfstack, void *addr) {
     MEMCC_CHECK(dfstack && dfstack->last != dfstack->pool, /*void*/);
 
     // behavior normal pop, without addr
@@ -151,7 +142,7 @@ static inline void memcc_dfstack_pop(memcc_dfstack_t *dfstack, void *addr) {
 
     MEMCC_ZERO_FREE(dfstack->last+1, head - (struct memcc_dfmeta *)dfstack->last);
 }
-static inline void memcc_dfstack_clear(memcc_dfstack_t *dfstack) {
+static inline void memcc_dfstack_clear_ufy(memcc_dfstack_t *dfstack) {
     MEMCC_CHECK(dfstack, /*void*/);
 
     dfstack->last = dfstack->pool;
@@ -162,6 +153,12 @@ static inline void memcc_dfstack_clear(memcc_dfstack_t *dfstack) {
     meta->lcount = 0;
     meta->ncount = 0;
 }
+
+
+/* ================================================================================ */
+/*  INTERFACE ALIAS                                                                 */
+/* ================================================================================ */
+
 
 
 #ifdef __cplusplus
