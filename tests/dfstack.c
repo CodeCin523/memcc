@@ -22,17 +22,30 @@ static void print_history(void) {
 
     for (uint32_t i = 0; i < head_history_count; ++i) {
         struct memcc_dfmeta *head = head_history[i].head;
-        struct memcc_dfmeta *foot = head + (head->ncount & MEMCC_DFSTACK_VALUE);
 
-        printf("  [%03u] head:%p foot:%p size:%u | lc:%u nc:%u flags:%u\n",
-            i,
-            (void*)head,
-            (void*)foot,
-            head_history[i].asked_size,
-            head->lcount & MEMCC_DFSTACK_VALUE,
-            head->ncount & MEMCC_DFSTACK_VALUE,
-            (head->lcount & MEMCC_DFSTACK_FLAGS) ? 1 : 0
-        );
+        uint32_t head_lc = head->lcount & MEMCC_DFSTACK_VALUE;
+        uint32_t head_nc = head->ncount & MEMCC_DFSTACK_VALUE;
+
+        printf("  [%03u] size:%u\n", i, head_history[i].asked_size);
+        printf("         head:%p (lc:%u nc:%u)\n",
+               (void*)head, head_lc, head_nc);
+
+        if (head_nc == 0) {
+            printf("         foot: <none> (ncount == 0)\n");
+        } else {
+            struct memcc_dfmeta *foot = head + head_nc;
+
+            uint32_t foot_lc = foot->lcount & MEMCC_DFSTACK_VALUE;
+            uint32_t foot_nc = foot->ncount & MEMCC_DFSTACK_VALUE;
+            uint32_t foot_flag = (foot->lcount & MEMCC_DFSTACK_FLAGS) ? 1 : 0;
+
+            if (foot == head) {
+                printf("         foot: <same as head>\n");
+            } else {
+                printf("         foot:%p (lc:%u nc:%u flags:%u)\n",
+                       (void*)foot, foot_lc, foot_nc, foot_flag);
+            }
+        }
     }
 }
 
@@ -71,6 +84,10 @@ static void validate_links(void) {
     for (uint32_t i = 0; i < head_history_count; ++i) {
         struct memcc_dfmeta *h = head_history[i].head;
         uint32_t n = h->ncount & MEMCC_DFSTACK_VALUE;
+
+        // 🔑 Skip collapsed / inactive nodes
+        if (n == 0)
+            continue;
 
         struct memcc_dfmeta *f = h + n;
 
@@ -215,6 +232,33 @@ int main(void) {
 
     memcc_dfstack_t stack;
     memcc_setup_dfstack(&stack, buffer, sizeof(buffer));
+    printf("buffer : %p\npool : %p\n", buffer, stack.pool);
+
+    /*
+    struct memcc_dfmeta *meta_01 = (struct memcc_dfmeta *) stack.last;
+    printf("meta_00         : %p, lc : %d, nc : %d\n", meta_01, meta_01->lcount, meta_01->ncount);
+    printf("\n");
+
+    memcc_dfstack_push(&stack, 32);
+    printf("meta_00         : %p, lc : %d, nc : %d\n", meta_01, meta_01->lcount, meta_01->ncount);
+    struct memcc_dfmeta *meta_02 = (struct memcc_dfmeta *) stack.last;
+    struct memcc_dfmeta *meta_03 = meta_02 - meta_02->lcount;
+    printf("meta_00_moved   : %p, lc : %d, nc : %d\n", meta_03, meta_03->lcount, meta_03->ncount);
+    printf("meta_01         : %p, lc : %d, nc : %d\n", meta_02, meta_02->lcount, meta_02->ncount);
+    printf("\n");
+
+    memcc_dfstack_push(&stack, 64);
+    struct memcc_dfmeta *meta_04 = (struct memcc_dfmeta *) stack.last;
+    struct memcc_dfmeta *meta_05 = meta_04 - meta_04->lcount;
+    struct memcc_dfmeta *meta_01_pair = meta_05 - meta_05->lcount;
+    printf("meta_00         : %p, lc : %d, nc : %d\n", meta_01, meta_01->lcount, meta_01->ncount);
+    printf("meta_00_moved   : %p, lc : %d, nc : %d\n", meta_03, meta_03->lcount, meta_03->ncount);
+    printf("meta_00_recalc  : %p, lc : %d, nc : %d\n", meta_01_pair, meta_01_pair->lcount, meta_01_pair->ncount);
+    printf("meta_01         : %p, lc : %d, nc : %d\n", meta_02, meta_02->lcount, meta_02->ncount);
+    printf("meta_01_moved   : %p, lc : %d, nc : %d\n", meta_05, meta_05->lcount, meta_05->ncount);
+    printf("meta_02         : %p, lc : %d, nc : %d\n", meta_04, meta_04->lcount, meta_04->ncount);
+    printf("\n");
+    */
 
     test_basic(&stack);
     reset_all(&stack);
@@ -224,7 +268,7 @@ int main(void) {
 
     test_interleaved(&stack);
     reset_all(&stack);
-
+    
     memcc_teardown_dfstack(&stack);
     return 0;
 }

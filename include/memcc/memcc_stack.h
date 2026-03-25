@@ -69,37 +69,38 @@ static inline void *memcc_dfstack_push_tu(memcc_dfstack_t *dfstack, uint32_t siz
     );
 
     // where is next
-    struct memcc_dfmeta *next = (struct memcc_dfmeta *) memcc_align_ceil(payload + size, alignof(struct memcc_dfmeta));
+    struct memcc_dfmeta *foot = (struct memcc_dfmeta *) memcc_align_ceil(payload + size, alignof(struct memcc_dfmeta));
     // where are lasts
-    struct memcc_dfmeta *olast = (struct memcc_dfmeta *) dfstack->last;
-    struct memcc_dfmeta *nlast = (struct memcc_dfmeta *) memcc_align_floor(
+    struct memcc_dfmeta *last_head = (struct memcc_dfmeta *) dfstack->last;
+    struct memcc_dfmeta *head = (struct memcc_dfmeta *) memcc_align_floor(
         payload - sizeof(struct memcc_dfmeta),
         alignof(struct memcc_dfmeta)
     );
 
 
     // Bounds check
-    if((uint8_t *)(next + 1) - dfstack->pool > dfstack->size)
+    if((uint8_t *)(foot + 1) - dfstack->pool > dfstack->size)
         return NULL;
 
-    if(olast != nlast) {
+    if(head > last_head) {
         // tell the pair that we have moved.
-        if(olast->lcount != 0) {
-            struct memcc_dfmeta *olast_pair = olast - (olast->lcount & MEMCC_DFSTACK_VALUE);
-            olast_pair->ncount = nlast - olast_pair;
-        }
-
-        nlast->lcount = olast->lcount;
-        nlast->ncount = olast->ncount;
+        if(last_head->lcount != 0) {
+            struct memcc_dfmeta *last_pair = last_head - (last_head->lcount & MEMCC_DFSTACK_VALUE);
+            last_pair->ncount = head - last_pair;
+            head->lcount = last_pair->ncount;
+        } /* else { // make sure the meta at pool is always valid, maybe re-implement later if checks status function are added
+            last_head->ncount = head - last_head;
+            head->lcount = last_head->ncount;
+        } */
     }
 
-    nlast->ncount = next - nlast;
-    next->lcount = nlast->ncount;
-    next->ncount = 0;
+    head->ncount = foot - head;
+    foot->lcount = head->ncount;
+    foot->ncount = 0;
 
-    MEMCC_ZERO_ALLOC(nlast+1, (nlast->ncount-1)*sizeof(struct memcc_dfmeta));
+    MEMCC_ZERO_ALLOC(head+1, (head->ncount-1)*sizeof(struct memcc_dfmeta));
 
-    dfstack->last = (uint8_t *)next;
+    dfstack->last = (uint8_t *)foot;
     return payload;
 }
 
@@ -119,11 +120,11 @@ static inline void memcc_dfstack_pop_tu(memcc_dfstack_t *dfstack, void *addr) {
             (uint8_t *)addr - sizeof(struct memcc_dfmeta),
             alignof(struct memcc_dfmeta)
         );
-        struct memcc_dfmeta * nfoot = head + head->ncount;
+        struct memcc_dfmeta *nfoot = head + head->ncount;
 
         // deffered free
         if(nfoot != foot) {
-            foot->ncount |= MEMCC_DFSTACK_FLAGS;
+            nfoot->lcount |= MEMCC_DFSTACK_FLAGS;
             return;
         }
 
@@ -131,6 +132,7 @@ static inline void memcc_dfstack_pop_tu(memcc_dfstack_t *dfstack, void *addr) {
     }
 
     // normal behavior otherwise
+    head->ncount = 0;
     foot->lcount = 0;
     foot->ncount = 0;
     dfstack->last = (uint8_t *)head;
@@ -138,12 +140,16 @@ static inline void memcc_dfstack_pop_tu(memcc_dfstack_t *dfstack, void *addr) {
 
     // cascade deffered collapses
     while(dfstack->last != dfstack->pool) {
-        struct memcc_dfmeta *prev = (struct memcc_dfmeta *)dfstack->last;
+        struct memcc_dfmeta *prev_foot = (struct memcc_dfmeta *)dfstack->last;
 
-        if((prev->lcount & MEMCC_DFSTACK_FLAGS) == 0)
+        if((prev_foot->lcount & MEMCC_DFSTACK_FLAGS) == 0)
             break;
 
-        dfstack->last -= prev->lcount & MEMCC_DFSTACK_VALUE;
+        struct memcc_dfmeta *prev_head = prev_foot - (prev_foot->lcount & MEMCC_DFSTACK_VALUE);
+        prev_head->ncount = 0;
+        prev_foot->lcount = 0;
+        prev_foot->ncount = 0;
+        dfstack->last = (uint8_t *) prev_head;
     }
 
     MEMCC_ZERO_FREE(
