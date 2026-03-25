@@ -85,7 +85,7 @@ static inline void *memcc_dfstack_push_tu(memcc_dfstack_t *dfstack, uint32_t siz
     if(olast != nlast) {
         // tell the pair that we have moved.
         if(olast->lcount != 0) {
-            struct memcc_dfmeta *olast_pair = olast - olast->lcount;
+            struct memcc_dfmeta *olast_pair = olast - (olast->lcount & MEMCC_DFSTACK_VALUE);
             olast_pair->ncount = nlast - olast_pair;
         }
 
@@ -113,7 +113,7 @@ static inline void memcc_dfstack_pop_tu(memcc_dfstack_t *dfstack, void *addr) {
     // behavior with addr
     if(addr) {
         // technically bound check, but it is allowing too high, for now it's ok though
-        MEMCC_CHECK((uint8_t *)addr - dfstack->pool > 0 && (uint8_t *)addr - dfstack->pool < dfstack->size, /*void*/);
+        // MEMCC_CHECK((uint8_t *)addr - dfstack->pool > 0 && (uint8_t *)addr - dfstack->pool < dfstack->size, /*void*/);
 
         head = (struct memcc_dfmeta *) memcc_align_floor(
             (uint8_t *)addr - sizeof(struct memcc_dfmeta),
@@ -123,7 +123,7 @@ static inline void memcc_dfstack_pop_tu(memcc_dfstack_t *dfstack, void *addr) {
 
         // deffered free
         if(nfoot != foot) {
-            foot->lcount |= MEMCC_DFSTACK_FLAGS;
+            foot->ncount |= MEMCC_DFSTACK_FLAGS;
             return;
         }
 
@@ -147,7 +147,7 @@ static inline void memcc_dfstack_pop_tu(memcc_dfstack_t *dfstack, void *addr) {
     }
 
     MEMCC_ZERO_FREE(
-        dfstack->last+sizeof(struct memcc_dfmeta),
+        dfstack->last+1,
         (uint8_t *)head - dfstack->last
     );
 }
