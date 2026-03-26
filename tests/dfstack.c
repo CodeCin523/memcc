@@ -192,6 +192,43 @@ static void test_interleaved(memcc_dfstack_t *stack) {
 
 /* -------------------------------------------------------------------------- */
 
+static void test_restore(memcc_dfstack_t *stack) {
+    printf("\n==== RESTORE MARK ====\n");
+
+    void *a = memcc_dfstack_push(stack, 16);
+    push_history(stack, 16);
+
+    void *b = memcc_dfstack_push(stack, 32);
+    push_history(stack, 32);
+
+    void *c = memcc_dfstack_push(stack, 48);
+    push_history(stack, 48);
+
+    // mark after b
+    void *mark = memcc_dfstack_mark(stack);
+    printf("-- mark taken after b\n");
+
+    void *d = memcc_dfstack_push(stack, 64);
+    push_history(stack, 64);
+
+    void *e = memcc_dfstack_push(stack, 80);
+    push_history(stack, 80);
+
+    printf("\n-- restore to mark (should remove d + e)\n");
+    memcc_dfstack_restore(stack, mark);
+    print_history();
+    validate_links();
+
+    printf("\n-- pop remaining c, b, a --\n");
+    memcc_dfstack_pop(stack);
+    memcc_dfstack_pop(stack);
+    memcc_dfstack_pop(stack);
+    print_history();
+    validate_links();
+}
+
+/* -------------------------------------------------------------------------- */
+
 static void test_stress(memcc_dfstack_t *stack) {
     printf("\n==== STRESS ====\n");
 
@@ -267,6 +304,9 @@ int main(void) {
     reset_all(&stack);
 
     test_interleaved(&stack);
+    reset_all(&stack);
+
+    test_restore(&stack);
     reset_all(&stack);
     
     memcc_teardown_dfstack(&stack);
