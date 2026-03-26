@@ -23,12 +23,89 @@ struct memcc_dfmeta {
     uint32_t ncount; // distance in sizeof(memcc_dfmeta) to next meta
 };
 
+/*invariants (dfstack)
+ * ├─ structure
+ * |  ├─ each allocation has:
+ * |  |  └─ [head meta] ... [foot meta]
+ * |  ├─ head->ncount = distance to foot (in meta units)
+ * |  └─ foot->lcount = distance to head (+ optional FLAG)
+ * ├─ core relation
+ * |  ├─ head + head->ncount == foot
+ * |  ├─ foot - (foot->lcount & VALUE) == head
+ * |  ├─ head->ncount == (foot->lcount & VALUE)
+ * |  ├─ head->ncount > 0
+ * |  └─ head < foot
+ * ├─ bounds
+ * |  └─ pool <= head < foot < pool + size
+ * ├─ last pointer
+ * |  └─ last points to current top foot
+ * ├─ navigation
+ * |  ├─ forward  : foot = head + head->ncount
+ * |  └─ backward : head = foot - (foot->lcount & VALUE)
+ * ├─ deferred free
+ * |  ├─ (foot->lcount & FLAG) != 0 → block is logically freed
+ * |  └─ structure remains valid until collapse
+ * ├─ collapse
+ * |  ├─ occurs when flagged block reaches top
+ * |  └─ effect:
+ * |     ├─ head->ncount = 0
+ * |     ├─ foot->lcount = 0
+ * |     └─ foot->ncount = 0
+ * ├─ push
+ * |  ├─ head->ncount = span
+ * |  ├─ foot->lcount = span
+ * |  ├─ foot->ncount = 0
+ * |  ├─ payload is properly aligned
+ * |  ├─ head / foot aligned to alignof(meta)
+ * |  └─ if head > previous head:
+ * |     └─ chain must be repaired to remain navigable
+ * ├─ pop
+ * |  ├─ top pop:
+ * |  |  └─ last = head
+ * |  └─ deferred pop:
+ * |     └─ foot->lcount |= FLAG
+ * ├─ restore
+ * |  ├─ valid mark : pool <= mark <= pool + size
+ * |  ├─ last = resolved head
+ * |  └─ cascade collapse still applies
+ * └─ zeroing
+ *    ├─ only unreachable memory may be zeroed
+ *    ├─ must NOT zero:
+ *    |  ├─ active head
+ *    |  ├─ active foot
+ *    |  └─ any reachable meta
+ *    └─ zeroed region must be outside active structure
+ */
 typedef struct memcc_dfstack {
     uint8_t *pool;  // start of memory
     uint8_t *last;  // points to current top meta
     size_t   size;  // total byte count in pool
 } memcc_dfstack_t;
 
+/*invariants (nmstack)
+ * ├─ global
+ * |  ├─ pool <= top <= pool + size
+ * |  ├─ top moves forward on push
+ * |  └─ top moves backward only on restore / clear
+ * ├─ allocation
+ * |  ├─ payload = align_ceil(previous_top, align)
+ * |  ├─ top = payload + size
+ * |  ├─ payload >= previous_top
+ * |  └─ payload + size <= pool + size
+ * ├─ ordering
+ * |  └─ allocations are strictly non-overlapping and ordered
+ * ├─ alignment
+ * |  └─ payload % align == 0
+ * ├─ padding
+ * |  └─ alignment padding is consumed (not reused until restore / clear)
+ * ├─ mark / restore
+ * |  ├─ valid mark : pool <= mark <= pool + size
+ * |  ├─ restore    : top = mark
+ * |  └─ zero       : [mark, old_top) is zeroed
+ * └─ clear
+ *    ├─ top = pool
+ *    └─ entire pool is zeroed
+ */
 typedef struct memcc_nmstack {
     uint8_t *pool;
     uint8_t *top;
@@ -181,7 +258,7 @@ static inline void memcc_dfstack_pop_tu(memcc_dfstack_t *dfstack, void *addr) {
 }
 
 static inline void *memcc_dfstack_mark_tu(memcc_dfstack_t *dfstack) {
-    MEMCC_CHECK(dfstack && dfstack->last != dfstack->pool, NULL);
+    MEMCC_CHECK(dfstack, NULL);
     return dfstack->last + sizeof(struct memcc_dfmeta);
 }
 static inline void memcc_dfstack_restore_tu(memcc_dfstack_t *dfstack, void *mark) {
