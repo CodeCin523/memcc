@@ -6,8 +6,9 @@ extern "C" {
 #endif
 
 
-#include <stdint.h>
+#include <stdalign.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <limits.h>
 
 #if !defined(__GNUC__) && !defined(__clang__)
