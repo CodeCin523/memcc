@@ -26,7 +26,7 @@ struct memcc_dfmeta {
 typedef struct memcc_dfstack {
     uint8_t *pool;  // start of memory
     uint8_t *last;  // points to current top meta
-    uint32_t size;  // total byte count in pool
+    size_t   size;  // total byte count in pool
 } memcc_dfstack_t;
 
 
@@ -41,7 +41,9 @@ static inline void memcc_setup_dfstack_tu(memcc_dfstack_t *dfstack, void *pool, 
     dfstack->last = dfstack->pool;
 
     // get size, ajust with moved pool
-    dfstack->size = size - ((uintptr_t)dfstack->pool - (uintptr_t)pool);
+    uintptr_t shift = (uintptr_t)dfstack->pool - (uintptr_t)pool;
+    MEMCC_CHECK(size > shift, /*void*/);
+    dfstack->size = size - shift;
 
     MEMCC_ZERO_ALLOC(dfstack->pool, dfstack->size);
 
@@ -59,7 +61,7 @@ static inline void memcc_teardown_dfstack_tu(memcc_dfstack_t *dfstack) {
     dfstack->size = 0;
 }
 
-static inline void *memcc_dfstack_push_tu(memcc_dfstack_t *dfstack, uint32_t size, uint32_t align) {
+static inline void *memcc_dfstack_push_tu(memcc_dfstack_t *dfstack, size_t size, size_t align) {
     MEMCC_CHECK(dfstack && memcc_pow2(align), NULL);
 
     // calculate payload, span and next
@@ -77,25 +79,32 @@ static inline void *memcc_dfstack_push_tu(memcc_dfstack_t *dfstack, uint32_t siz
         alignof(struct memcc_dfmeta)
     );
 
-
     // Bounds check
     if((uint8_t *)(foot + 1) - dfstack->pool > dfstack->size)
         return NULL;
 
+    MEMCC_CHECK(head >= last_head, NULL);
     if(head > last_head) {
         // tell the pair that we have moved.
         if(last_head->lcount != 0) {
             struct memcc_dfmeta *last_pair = last_head - (last_head->lcount & MEMCC_DFSTACK_VALUE);
-            last_pair->ncount = head - last_pair;
-            head->lcount = last_pair->ncount;
+            size_t back_span = (size_t)(head - last_pair);
+            MEMCC_CHECK(back_span <= MEMCC_DFSTACK_VALUE, NULL);
+
+            last_pair->ncount = (uint32_t)back_span;
+            head->lcount = (uint32_t)back_span;
         } /* else { // make sure the meta at pool is always valid, maybe re-implement later if checks status function are added
             last_head->ncount = head - last_head;
             head->lcount = last_head->ncount;
         } */
     }
 
-    head->ncount = foot - head;
-    foot->lcount = head->ncount;
+    size_t span = (size_t)(foot - head);
+
+    MEMCC_CHECK(span <= MEMCC_DFSTACK_VALUE, NULL);
+    
+    head->ncount = (uint32_t)span;
+    foot->lcount = (uint32_t)span;
     foot->ncount = 0;
 
     MEMCC_ZERO_ALLOC(head+1, (head->ncount-1)*sizeof(struct memcc_dfmeta));
@@ -103,7 +112,6 @@ static inline void *memcc_dfstack_push_tu(memcc_dfstack_t *dfstack, uint32_t siz
     dfstack->last = (uint8_t *)foot;
     return payload;
 }
-
 static inline void memcc_dfstack_pop_tu(memcc_dfstack_t *dfstack, void *addr) {
     MEMCC_CHECK(dfstack && dfstack->last != dfstack->pool, /*void*/);
 
@@ -113,14 +121,18 @@ static inline void memcc_dfstack_pop_tu(memcc_dfstack_t *dfstack, void *addr) {
 
     // behavior with addr
     if(addr) {
-        // technically bound check, but it is allowing too high, for now it's ok though
-        // MEMCC_CHECK((uint8_t *)addr - dfstack->pool > 0 && (uint8_t *)addr - dfstack->pool < dfstack->size, /*void*/);
-
         head = (struct memcc_dfmeta *) memcc_align_floor(
             (uint8_t *)addr - sizeof(struct memcc_dfmeta),
             alignof(struct memcc_dfmeta)
         );
+        MEMCC_CHECK(head->ncount > 0, /*void*/);
+
         struct memcc_dfmeta *nfoot = head + head->ncount;
+
+        MEMCC_CHECK((uint8_t *)nfoot >= dfstack->pool &&
+                (uint8_t *)nfoot < dfstack->pool + dfstack->size, /*void*/);
+
+        MEMCC_CHECK((nfoot->lcount & MEMCC_DFSTACK_VALUE) == head->ncount, /*void*/);
 
         // deffered free
         if(nfoot != foot) {
@@ -157,6 +169,10 @@ static inline void memcc_dfstack_pop_tu(memcc_dfstack_t *dfstack, void *addr) {
         (uint8_t *)head - dfstack->last
     );
 }
+
+static inline void *memcc_dfstack_mark_tu();
+static inline void memcc_dfstack_restore_tu();
+
 static inline void memcc_dfstack_clear_tu(memcc_dfstack_t *dfstack) {
     MEMCC_CHECK(dfstack, /*void*/);
 
@@ -181,9 +197,9 @@ static inline void memcc_dfstack_clear_tu(memcc_dfstack_t *dfstack) {
 #define memcc_dfstack_push(dfstack, size) memcc_dfstack_push_tu(dfstack, size, alignof(max_align_t))
 #define memcc_dfstack_push_align(dfstack, size, align) memcc_dfstack_push_tu(dfstack, size, align)
 #define memcc_dfstack_push_type(dfstack, count, type) memcc_dfstack_push_tu(dfstack, sizeof(type)*count, alignof(type))
-
 #define memcc_dfstack_pop(dfstack) memcc_dfstack_pop_tu(dfstack, NULL)
 #define memcc_dfstack_pop_addr(dfstack, addr) memcc_dfstack_pop_tu(dfstack, addr)
+
 #define memcc_dfstack_clear(dfstack) memcc_dfstack_clear_tu(dfstack)
 
 
