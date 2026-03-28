@@ -137,6 +137,8 @@ static inline void memcc_setup_dfstack_tu(memcc_dfstack_t *dfstack, void *pool, 
 static inline void memcc_teardown_dfstack_tu(memcc_dfstack_t *dfstack) {
     MEMCC_CHECK(dfstack, /*void*/);
 
+    // MEMCC_ZERO_FREE(dfstack->pool, dfstack->size);
+
     dfstack->pool = NULL;
     dfstack->last = NULL;
     dfstack->size = 0;
