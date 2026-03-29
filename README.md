@@ -12,10 +12,10 @@ See the documentation for the full list of features.
 
 **Macros:**
 
-* **`MEMCC_NO_CHECKS`** – disables runtime checks (`MEMCC_CHECK`)  
-* **`MEMCC_DEBUG`** – enables assertions for debugging  
-* **`MEMCC_ZERO_ON_ALLOC`** – zero memory when allocating  
-* **`MEMCC_ZERO_ON_FREE`** – zero memory when freeing (useful for sensitive data)  
+* **`MEMCC_NO_CHECKS`** – disables runtime checks (`MEMCC_CHECK`)
+* **`MEMCC_DEBUG`** – enables assertions for debugging
+* **`MEMCC_ZERO_ON_ALLOC`** – zero memory when allocating
+* **`MEMCC_ZERO_ON_FREE`** – zero memory when freeing (useful for sensitive data)
 
 **Set macros for your target:**
 
@@ -25,7 +25,7 @@ target_compile_definitions(myapp PRIVATE
     MEMCC_DEBUG
     MEMCC_ZERO_ON_ALLOC
 )
-````
+```
 
 **Or set macros for all targets linking memcc:**
 
@@ -73,33 +73,77 @@ target_link_libraries(myapp PRIVATE memcc::memcc)
 Include headers in your source:
 
 ```c
-#include "memcc.h"
+#include "memcc_stack.h"
+#include "memcc_block.h"  // for other allocators
+```
+
+> **Important:** If a header file includes an implementation section (controlled by a `*_IMPLEMENTATION` macro), you should define that macro in **only one `.c` file**.  
+> All other files that include the header should **not define the macro**, they will see only the declarations, not the implementation.  
+> Defining it in multiple files will cause duplicate symbol errors during linking.
+> Example:
+
+```c
+#define MEMCC_STACK_IMPLEMENTATION
+#define MEMCC_BLOCK_IMPLEMENTATION
+#include "memcc_stack.h"
+#include "memcc_block.h"
 ```
 
 ---
 
-### 3. Example
+### 3. Example — NMStack Allocator
 
 ```c
-#include "memcc.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+
+#define MEMCC_STACK_IMPLEMENTATION
+#include "memcc_stack.h"
 
 int main(void) {
-    int buffer[16];
+    size_t stack_size = 16 * sizeof(uint32_t);
 
-    // Align pointer to 16 bytes
-    void *aligned = memcc_align_forward(buffer, 16);
+    // Allocate a properly aligned pool
+    void *pool = aligned_alloc(alignof(max_align_t), stack_size);
+    if (!pool) {
+        perror("aligned_alloc failed");
+        return 1;
+    }
 
-    // Zero memory if enabled via MEMCC_ZERO_ON_ALLOC
-    MEMCC_ZERO(aligned, sizeof(buffer));
+    // Initialize NMStack
+    memcc_nmstack_t stack;
+    memcc_setup_nmstack(&stack, pool, stack_size);
+
+    void *mark = NULL;
+
+    // Push values into the stack
+    for (uint32_t i = 0; i < 4; ++i) {
+        uint32_t *ptr = memcc_nmstack_push_type(&stack, 1, uint32_t);
+        if (!ptr) {
+            printf("Push failed at i=%u\n", i);
+            break;
+        }
+        if(i == 1) mark = ptr; // Take a mark after the second push
+
+        *ptr = i;  // store value in stack
+    }
+
+    // Restore stack to mark (demonstrates partial pop)
+    memcc_nmstack_restore(&stack, mark);
+
+    // Manual iteration after restore (just for demonstration)
+    while (stack.top != pool) {
+        stack.top -= sizeof(uint32_t);
+        uint32_t val = *(uint32_t *)stack.top;
+        printf("Popped: %u\n", val);
+    }
+
+    // Clear and teardown
+    memcc_nmstack_clear(&stack);
+    memcc_teardown_nmstack(&stack);
+    free(pool);
 
     return 0;
 }
 ```
-
----
-
-## Notes
-
-* `memcc` is header-only; all `static inline` functions compile directly in your code.
-* Optional macros are now **build-controlled** and do not require manual `#define`s in your source files.
-* Future compiled `.c` functions can be added without changing usage; simply `target_link_libraries(myapp PRIVATE memcc::memcc)`.

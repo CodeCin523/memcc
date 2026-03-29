@@ -1,3 +1,6 @@
+/* ================================================================================ */
+/*  DEFINITION                                                                      */
+/* ================================================================================ */
 #ifndef MEMCC_STACK_H
 #define MEMCC_STACK_H
 
@@ -5,21 +8,12 @@
 extern "C" {
 #endif
 
-
 #include "memcc.h"
 
 
 /* ================================================================================ */
-/*  TYPEDEF                                                                         */
+/*  DEFERRED_STACK                                                                  */
 /* ================================================================================ */
-
-#define MEMCC_DFSTACK_FLAGS (0x80000000u)
-#define MEMCC_DFSTACK_VALUE (0x7FFFFFFFu)
-
-struct memcc_dfmeta {
-    uint32_t lcount; // distance in sizeof(memcc_dfmeta) to previous meta & flag collapse
-    uint32_t ncount; // distance in sizeof(memcc_dfmeta) to next meta
-};
 
 /*invariants (dfstack)
  * ├─ structure
@@ -74,11 +68,31 @@ struct memcc_dfmeta {
  *    |  └─ any reachable meta
  *    └─ zeroed region must be outside active structure
  */
+
+struct memcc_dfmeta {
+    uint32_t lcount; // distance in sizeof(memcc_dfmeta) to previous meta & flag collapse
+    uint32_t ncount; // distance in sizeof(memcc_dfmeta) to next meta
+};
+
 typedef struct memcc_dfstack {
     uint8_t *pool;  // start of memory
     uint8_t *last;  // points to current top meta
     size_t   size;  // total byte count in pool
 } memcc_dfstack_t;
+
+void memcc_setup_dfstack_tu     (memcc_dfstack_t *dfstack, void *pool, size_t size);
+void memcc_teardown_dfstack_tu  (memcc_dfstack_t *dfstack);
+
+void *memcc_dfstack_push_tu     (memcc_dfstack_t *dfstack, size_t size, size_t align);
+void memcc_dfstack_pop_tu       (memcc_dfstack_t *dfstack, void *addr);
+void *memcc_dfstack_mark_tu     (memcc_dfstack_t *dfstack);
+void memcc_dfstack_restore_tu   (memcc_dfstack_t *dfstack, void *mark);
+void memcc_dfstack_clear_tu     (memcc_dfstack_t *dfstack);
+
+
+/* ================================================================================ */
+/*  NO_META_STACK                                                                   */
+/* ================================================================================ */
 
 /*invariants (nmstack)
  * ├─ global
@@ -104,18 +118,80 @@ typedef struct memcc_dfstack {
  *    ├─ top = pool
  *    └─ entire pool is zeroed
  */
+
 typedef struct memcc_nmstack {
     uint8_t *pool;
     uint8_t *top;
     size_t   size;
 } memcc_nmstack_t;
 
+void memcc_setup_nmstack_tu     (memcc_nmstack_t *nmstack, void *pool, size_t size);
+void memcc_teardown_nmstack_tu  (memcc_nmstack_t *nmstack);
+
+void *memcc_nmstack_push_tu     (memcc_nmstack_t *nmstack, size_t size, size_t align);
+void *memcc_nmstack_mark_tu     (memcc_nmstack_t *nmstack);
+void memcc_nmstack_restore_tu   (memcc_nmstack_t *nmstack, void *mark);
+void memcc_nmstack_clear_tu     (memcc_nmstack_t *nmstack);
+
+
+/* ================================================================================ */
+/*  ALIAS                                                                           */
+/* ================================================================================ */
+
+// DEFERRED_STACK
+#define memcc_setup_dfstack(...)        memcc_setup_dfstack_tu(__VA_ARGS__)
+#define memcc_teardown_dfstack(...)     memcc_teardown_dfstack_tu(__VA_ARGS__)
+
+#define memcc_dfstack_push(...)         memcc_dfstack_push_tu(__VA_ARGS__, alignof(max_align_t))
+#define memcc_dfstack_push_align(...)   memcc_dfstack_push_tu(__VA_ARGS__)
+#define memcc_dfstack_push_type(stack,count,type) \
+                                        memcc_dfstack_push_tu(stack, sizeof(type)*(count), alignof(type))
+                                       
+#define memcc_dfstack_pop(...)          memcc_dfstack_pop_tu(__VA_ARGS__, NULL)
+#define memcc_dfstack_pop_addr(...)     memcc_dfstack_pop_tu(__VA_ARGS__)
+#define memcc_dfstack_mark(...)         memcc_dfstack_mark_tu(__VA_ARGS__)
+#define memcc_dfstack_restore(...)      memcc_dfstack_restore_tu(__VA_ARGS__)
+#define memcc_dfstack_clear(...)        memcc_dfstack_clear_tu(__VA_ARGS__)
+
+// NO_META_STACK
+#define memcc_setup_nmstack(...)        memcc_setup_nmstack_tu(__VA_ARGS__)
+#define memcc_teardown_nmstack(...)     memcc_teardown_nmstack_tu(__VA_ARGS__)
+
+#define memcc_nmstack_push(...)         memcc_nmstack_push_tu(__VA_ARGS__, alignof(max_align_t))
+#define memcc_nmstack_push_align(...)   memcc_nmstack_push_tu(__VA_ARGS__)
+#define memcc_nmstack_push_type(stack,count,type) \
+                                        memcc_nmstack_push_tu(stack, sizeof(type)*(count), alignof(type))
+
+#define memcc_nmstack_mark(...)         memcc_nmstack_mark_tu(__VA_ARGS__)
+#define memcc_nmstack_restore(...)      memcc_nmstack_restore_tu(__VA_ARGS__)
+#define memcc_nmstack_clear(...)        memcc_nmstack_clear_tu(__VA_ARGS__)
+
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* MEMCC_STACK_H */
+
+
+/* ================================================================================ */
+/*  IMPLEMENTATION                                                                  */
+/* ================================================================================ */
+#ifdef MEMCC_STACK_IMPLEMENTATION
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 
 /* ================================================================================ */
 /*  DEFERRED_STACK                                                                  */
 /* ================================================================================ */
 
-static inline void memcc_setup_dfstack_tu(memcc_dfstack_t *dfstack, void *pool, size_t size) {
+#define MEMCC_DFSTACK_FLAGS (0x80000000u)
+#define MEMCC_DFSTACK_VALUE (0x7FFFFFFFu)
+
+void memcc_setup_dfstack_tu(memcc_dfstack_t *dfstack, void *pool, size_t size) {
     MEMCC_CHECK(dfstack && pool && size > 0, /*void*/);
 
     dfstack->pool = (uint8_t *) memcc_align_ceil(pool, alignof(max_align_t));
@@ -134,7 +210,7 @@ static inline void memcc_setup_dfstack_tu(memcc_dfstack_t *dfstack, void *pool, 
     meta->ncount = 0;
 #endif
 }
-static inline void memcc_teardown_dfstack_tu(memcc_dfstack_t *dfstack) {
+void memcc_teardown_dfstack_tu(memcc_dfstack_t *dfstack) {
     MEMCC_CHECK(dfstack, /*void*/);
 
     // MEMCC_ZERO_FREE(dfstack->pool, dfstack->size);
@@ -144,7 +220,7 @@ static inline void memcc_teardown_dfstack_tu(memcc_dfstack_t *dfstack) {
     dfstack->size = 0;
 }
 
-static inline void *memcc_dfstack_push_tu(memcc_dfstack_t *dfstack, size_t size, size_t align) {
+void *memcc_dfstack_push_tu(memcc_dfstack_t *dfstack, size_t size, size_t align) {
     MEMCC_CHECK(dfstack && memcc_pow2(align), NULL);
 
     // calculate payload, span and next
@@ -199,7 +275,7 @@ static inline void *memcc_dfstack_push_tu(memcc_dfstack_t *dfstack, size_t size,
     dfstack->last = (uint8_t *)foot;
     return payload;
 }
-static inline void memcc_dfstack_pop_tu(memcc_dfstack_t *dfstack, void *addr) {
+void memcc_dfstack_pop_tu(memcc_dfstack_t *dfstack, void *addr) {
     MEMCC_CHECK(dfstack && dfstack->last != dfstack->pool, /*void*/);
 
     // behavior normal pop, without addr
@@ -257,11 +333,11 @@ static inline void memcc_dfstack_pop_tu(memcc_dfstack_t *dfstack, void *addr) {
     );
 }
 
-static inline void *memcc_dfstack_mark_tu(memcc_dfstack_t *dfstack) {
+void *memcc_dfstack_mark_tu(memcc_dfstack_t *dfstack) {
     MEMCC_CHECK(dfstack, NULL);
     return dfstack->last + sizeof(struct memcc_dfmeta);
 }
-static inline void memcc_dfstack_restore_tu(memcc_dfstack_t *dfstack, void *mark) {
+void memcc_dfstack_restore_tu(memcc_dfstack_t *dfstack, void *mark) {
     uint8_t *mark8 = (uint8_t *)mark;
 
     MEMCC_CHECK(dfstack && mark8 >= dfstack->pool && mark8 <= (dfstack->pool + dfstack->size), /*void*/);
@@ -296,7 +372,7 @@ static inline void memcc_dfstack_restore_tu(memcc_dfstack_t *dfstack, void *mark
     MEMCC_ZERO_FREE(head + 1, len);
 }
 
-static inline void memcc_dfstack_clear_tu(memcc_dfstack_t *dfstack) {
+void memcc_dfstack_clear_tu(memcc_dfstack_t *dfstack) {
     MEMCC_CHECK(dfstack, /*void*/);
 
     dfstack->last = dfstack->pool;
@@ -314,7 +390,7 @@ static inline void memcc_dfstack_clear_tu(memcc_dfstack_t *dfstack) {
 /*  NO_META_STACK                                                                   */
 /* ================================================================================ */
 
-static inline void memcc_setup_nmstack_tu(memcc_nmstack_t *nmstack, void *pool, size_t size) {
+void memcc_setup_nmstack_tu     (memcc_nmstack_t *nmstack, void *pool, size_t size) {
     MEMCC_CHECK(nmstack && pool && size > 0, /*void*/);
 
     nmstack->pool = (uint8_t *) memcc_align_ceil(pool, alignof(max_align_t));
@@ -327,7 +403,7 @@ static inline void memcc_setup_nmstack_tu(memcc_nmstack_t *nmstack, void *pool, 
 
     MEMCC_ZERO_ALLOC(nmstack->pool, nmstack->size);
 }
-static inline void memcc_teardown_nmstack_tu(memcc_nmstack_t *nmstack) {
+void memcc_teardown_nmstack_tu  (memcc_nmstack_t *nmstack) {
     MEMCC_CHECK(nmstack, /*void*/);
 
     nmstack->pool = NULL;
@@ -335,7 +411,7 @@ static inline void memcc_teardown_nmstack_tu(memcc_nmstack_t *nmstack) {
     nmstack->size = 0;
 }
 
-static inline void *memcc_nmstack_push_tu(memcc_nmstack_t *nmstack, size_t size, size_t align) {
+void *memcc_nmstack_push_tu     (memcc_nmstack_t *nmstack, size_t size, size_t align) {
     MEMCC_CHECK(nmstack && memcc_pow2(align), NULL);
 
     uint8_t *payload = (uint8_t *) memcc_align_ceil(nmstack->top, align);
@@ -350,11 +426,11 @@ static inline void *memcc_nmstack_push_tu(memcc_nmstack_t *nmstack, size_t size,
     return payload;
 }
 
-static inline void *memcc_nmstack_mark_tu(memcc_nmstack_t *nmstack) {
+void *memcc_nmstack_mark_tu     (memcc_nmstack_t *nmstack) {
     MEMCC_CHECK(nmstack, NULL);
     return nmstack->top;
 }
-static inline void memcc_nmstack_restore_tu(memcc_nmstack_t *nmstack, void *mark) {
+void memcc_nmstack_restore_tu   (memcc_nmstack_t *nmstack, void *mark) {
     uint8_t * mark8 = (uint8_t *) mark; 
     
     MEMCC_CHECK(nmstack && mark8 >= nmstack->pool && mark8 <= (nmstack->pool + nmstack->size), /*void*/);
@@ -363,7 +439,7 @@ static inline void memcc_nmstack_restore_tu(memcc_nmstack_t *nmstack, void *mark
     nmstack->top = mark8;
 }
 
-static inline void memcc_nmstack_clear_tu(memcc_nmstack_t *nmstack) {
+void memcc_nmstack_clear_tu     (memcc_nmstack_t *nmstack) {
     MEMCC_CHECK(nmstack, /*void*/);
 
     nmstack->top = nmstack->pool;
@@ -371,40 +447,8 @@ static inline void memcc_nmstack_clear_tu(memcc_nmstack_t *nmstack) {
 }
 
 
-/* ================================================================================ */
-/*  INTERFACE ALIAS                                                                 */
-/* ================================================================================ */
-
-#define memcc_setup_dfstack(...) memcc_setup_dfstack_tu(__VA_ARGS__)
-#define memcc_teardown_dfstack(...) memcc_teardown_dfstack_tu(__VA_ARGS__)
-
-#define memcc_dfstack_push(stack, size) memcc_dfstack_push_tu(stack, size, alignof(max_align_t))
-#define memcc_dfstack_push_align(stack, size, align) memcc_dfstack_push_tu(stack, size, align)
-#define memcc_dfstack_push_type(stack, count, type) memcc_dfstack_push_tu(stack, sizeof(type)*(count), alignof(type))
-#define memcc_dfstack_pop(stack) memcc_dfstack_pop_tu(stack, NULL)
-#define memcc_dfstack_pop_addr(stack, ptr) memcc_dfstack_pop_tu(stack, ptr)
-
-#define memcc_dfstack_mark(stack) memcc_dfstack_mark_tu(stack)
-#define memcc_dfstack_restore(stack, mark) memcc_dfstack_restore_tu(stack, mark)
-
-#define memcc_dfstack_clear(stack) memcc_dfstack_clear_tu(stack)
-
-
-#define memcc_setup_nmstack(...) memcc_setup_nmstack_tu(__VA_ARGS__)
-#define memcc_teardown_nmstack(...) memcc_teardown_nmstack_tu(__VA_ARGS__)
-
-#define memcc_nmstack_push(stack, size) memcc_nmstack_push_tu(stack, size, alignof(max_align_t))
-#define memcc_nmstack_push_align(stack, size, align) memcc_nmstack_push_tu(stack, size, align)
-#define memcc_nmstack_push_type(stack, count, type) memcc_nmstack_push_tu(stack, sizeof(type)*(count), alignof(type))
-
-#define memcc_nmstack_mark(stack) memcc_nmstack_mark_tu(stack)
-#define memcc_nmstack_restore(stack, mark) memcc_nmstack_restore_tu(stack, mark)
-
-#define memcc_nmstack_clear(stack) memcc_nmstack_clear_tu(stack)
-
-
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* MEMCC_STACK_H */
+#endif /* MEMCC_STACK_IMPLEMENTATION */

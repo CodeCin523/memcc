@@ -1,3 +1,4 @@
+#define MEMCC_STACK_IMPLEMENTATION
 #include <memcc/memcc_stack.h>
 #include <stdio.h>
 #include <stdint.h>

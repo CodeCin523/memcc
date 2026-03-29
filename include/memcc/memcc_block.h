@@ -1,19 +1,24 @@
-#ifndef MEMCC_BLOCK_H
-#define MEMCC_BLOCK_H
+/* ================================================================================ */
+/*  DEFINITION                                                                      */
+/* ================================================================================ */
+#ifndef MEMCC_STACK_H
+#define MEMCC_STACK_H
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-
 #include "memcc.h"
 
 
 /* ================================================================================ */
-/*  TYPEDEF                                                                         */
+/*  SELF_BITMAP_BLOCK                                                               */
 /* ================================================================================ */
 
-// self-bitmap block
+/*invariants (sbblock)
+ * └─ TODO
+ */
+
 typedef struct memcc_sbblock {
     uint8_t *pool;          // start of the pointer, after the bitmap
     uint32_t block_num;     // total cell count
@@ -21,32 +26,99 @@ typedef struct memcc_sbblock {
     uint16_t block_size;    // size of single cell
 } memcc_sbblock_t;
 
-// static-size block
+void memcc_setup_sbblock_tu         (memcc_sbblock_t *sbblock, void *pool, size_t pool_size, size_t block_size, size_t block_align);
+void memcc_teardown_sbblock_tu      (memcc_sbblock_t *sbblock);
+
+uint32_t memcc_sbblock_alloc_ts     (memcc_sbblock_t *sbblock);
+uint32_t memcc_sbblock_find_run_ts  (memcc_sbblock_t *sbblock, uint32_t count);
+uint32_t memcc_sbblock_alloc_run_tu (memcc_sbblock_t *sbblock, uint32_t idx, uint32_t count);
+void memcc_sbblock_free_ts          (memcc_sbblock_t *sbblock, uint32_t idx);
+void memcc_sbblock_free_run_tu      (memcc_sbblock_t *sbblock, uint32_t idx, uint32_t count);
+
+static inline void *memcc_sbblock_get_ts(memcc_sbblock_t *sbblock, uint32_t idx) {
+    return sbblock->pool + idx * sbblock->block_size;
+}
+
+
+/* ================================================================================ */
+/*  STATIC_SIZE_BLOCK                                                               */
+/* ================================================================================ */
+
+/*invariants (ssblock)
+ * └─ TODO
+ */
+
 typedef struct memcc_ssblock {
 
 };
-// vector-size block
+
+
+/* ================================================================================ */
+/*  VECTOR_SIZE_BLOCK                                                               */
+/* ================================================================================ */
+
+/*invariants (vsblock)
+ * └─ TODO
+ */
+
 typedef struct memcc_vsblock {
 
 };
 
 
 /* ================================================================================ */
+/*  ALIAS                                                                           */
+/* ================================================================================ */
+
+// SELF_BITMAP_BLOCK
+#define memcc_setup_sbblock(...)        memcc_setup_sbblock_tu(__VA_ARGS__,  alignof(max_align_t))
+#define memcc_setup_sbblock_align(...)  memcc_setup_sbblock_tu(__VA_ARGS__)
+#define memcc_setup_sbblock_type(block, pool, pool_size, type) \
+                                        memcc_setup_sbblock_tu(block, pool, pool_size, sizeof(type), alignof(type))
+#define memcc_teardown_sbblock(...)     memcc_teardown_sbblock_tu(__VA_ARGS__)
+
+#define memcc_sbblock_alloc(...)        memcc_sbblock_alloc_ts(__VA_ARGS__)
+#define memcc_sbblock_find_run(...)     memcc_sbblock_find_run_ts(__VA_ARGS__)
+#define memcc_sbblock_alloc_run(...)    memcc_sbblock_alloc_run_tu(__VA_ARGS__)
+
+#define memcc_sbblock_free(...)         memcc_sbblock_free_ts(__VA_ARGS__)
+#define memcc_sbblock_free_run(...)     memcc_sbblock_free_run_tu(__VA_ARGS__)
+#define memcc_sbblock_get(...)          memcc_sbblock_get_ts(__VA_ARGS__)
+
+// STATIC_SIZE_BLOCK
+
+// VECTOR_SIZE_BLOCK
+
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* MEMCC_STACK_H */
+
+
+/* ================================================================================ */
+/*  IMPLEMENTATION                                                                  */
+/* ================================================================================ */
+#ifdef MEMCC_BLOCK_IMPLEMENTATION
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
+/* ================================================================================ */
 /*  SELF_BITMAP_BLOCK                                                               */
 /* ================================================================================ */
 
-// TODO : MEMCC_ZERO_ALLLOC and MEMCC_ZERO_FREE
-
-static inline void memcc_setup_sbblock_tu(memcc_sbblock_t *sbblock, void *pool, uint32_t pool_size, uint16_t block_size) {
+void memcc_setup_sbblock_tu(memcc_sbblock_t *sbblock, void *pool, size_t pool_size, size_t block_size, size_t block_align) {
     MEMCC_CHECK(sbblock && pool && memcc_pow2(block_size), /*void*/);
 
     uint8_t *base = (uint8_t *)pool;
     uint8_t *end  = base + pool_size;
 
-    size_t alignment = block_size;
-
     // Align end down to avoid partial block overrun
-    end = (uint8_t *)memcc_align_floor(end, alignment);
+    end = (uint8_t *)memcc_align_floor(end, block_align);
 
     // Initial estimate
     uint32_t cc = (uint32_t)((end - base) / block_size);
@@ -58,10 +130,9 @@ static inline void memcc_setup_sbblock_tu(memcc_sbblock_t *sbblock, void *pool, 
         bbc = (cc + 7) / 8;
 
         aligned_pool =
-            (uint8_t *)memcc_align_ceil(base + bbc, alignment);
-
+            (uint8_t *)memcc_align_ceil(base + bbc, block_align);
         // No room for blocks
-        MEMCC_CHECK(aligned_pool >= end, /*void*/);
+        MEMCC_CHECK(aligned_pool < end, /*void*/);
         // if (aligned_pool >= end) {
         //     sbblock->pool = NULL;
         //     sbblock->block_num = 0;
@@ -90,7 +161,7 @@ static inline void memcc_setup_sbblock_tu(memcc_sbblock_t *sbblock, void *pool, 
     // Bitmap at start of buffer
     memcc_zero(base, bbc);
 }
-static inline void memcc_teardown_sbblock_tu(memcc_sbblock_t *sbblock) {
+void memcc_teardown_sbblock_tu(memcc_sbblock_t *sbblock) {
     MEMCC_CHECK(sbblock, /*void*/);
 
     // MEMCC_ZERO_FREE(sbblock->pool - sbblock->bitmap_size, sbblock->block_size + sbblock->block_num * sbblock->block_size);
@@ -101,7 +172,7 @@ static inline void memcc_teardown_sbblock_tu(memcc_sbblock_t *sbblock) {
     sbblock->block_size = 0;
 }
 
-static inline uint32_t memcc_sbblock_alloc_ts(memcc_sbblock_t *sbblock) {
+uint32_t memcc_sbblock_alloc_ts(memcc_sbblock_t *sbblock) {
     MEMCC_CHECK(sbblock, /*void*/);
 
     uint8_t *bitmap = sbblock->pool - sbblock->bitmap_size;
@@ -122,7 +193,7 @@ static inline uint32_t memcc_sbblock_alloc_ts(memcc_sbblock_t *sbblock) {
     return UINT32_MAX;
 }
 
-static inline uint32_t memcc_sbblock_find_run_ts(memcc_sbblock_t *sbblock, uint32_t count) {
+uint32_t memcc_sbblock_find_run_ts(memcc_sbblock_t *sbblock, uint32_t count) {
     MEMCC_CHECK(sbblock && count > 0, UINT32_MAX);
     uint32_t run_start = 0, run_len = 0;
     uint8_t *bitmap = sbblock->pool - sbblock->bitmap_size;
@@ -142,7 +213,7 @@ static inline uint32_t memcc_sbblock_find_run_ts(memcc_sbblock_t *sbblock, uint3
 
     return UINT32_MAX;
 }
-static inline uint32_t memcc_sbblock_alloc_run_tu(memcc_sbblock_t *sbblock, uint32_t idx, uint32_t count) {
+uint32_t memcc_sbblock_alloc_run_tu(memcc_sbblock_t *sbblock, uint32_t idx, uint32_t count) {
     MEMCC_CHECK(sbblock && idx + count <= sbblock->block_num, UINT32_MAX);
 
     uint8_t *bitmap = sbblock->pool - sbblock->bitmap_size;
@@ -157,7 +228,7 @@ static inline uint32_t memcc_sbblock_alloc_run_tu(memcc_sbblock_t *sbblock, uint
     return idx;
 }
 
-static inline void memcc_sbblock_free_ts(memcc_sbblock_t *sbblock, uint32_t idx) {
+void memcc_sbblock_free_ts(memcc_sbblock_t *sbblock, uint32_t idx) {
     MEMCC_CHECK(sbblock && idx < sbblock->block_num, /*void*/);
     
     uint8_t *bitmap = sbblock->pool - sbblock->bitmap_size;
@@ -166,7 +237,7 @@ static inline void memcc_sbblock_free_ts(memcc_sbblock_t *sbblock, uint32_t idx)
 
     bitmap[idx_byte] &= ~(1 << idx_bit); // mark block free
 }
-static inline void memcc_sbblock_free_run_tu(memcc_sbblock_t *sbblock, uint32_t idx, uint32_t count) {
+void memcc_sbblock_free_run_tu(memcc_sbblock_t *sbblock, uint32_t idx, uint32_t count) {
     MEMCC_CHECK(sbblock && idx + count <= sbblock->block_num, UINT32_MAX);
 
     uint8_t *bitmap = sbblock->pool - sbblock->bitmap_size;
@@ -179,13 +250,13 @@ static inline void memcc_sbblock_free_run_tu(memcc_sbblock_t *sbblock, uint32_t 
     }
 }
 
-static inline void *memcc_sbblock_get_ts(memcc_sbblock_t *sbblock, uint32_t idx) {
-    return sbblock->pool + idx * sbblock->block_size;
-}
+/* ================================================================================ */
+/*  STATIC_SIZE_BLOCK                                                               */
+/* ================================================================================ */
 
 
 /* ================================================================================ */
-/*  INTERFACE ALIAS                                                                 */
+/*  VECTOR_SIZE_BLOCK                                                               */
 /* ================================================================================ */
 
 
@@ -193,4 +264,4 @@ static inline void *memcc_sbblock_get_ts(memcc_sbblock_t *sbblock, uint32_t idx)
 }
 #endif
 
-#endif /* MEMCC_BLOCK_H */
+#endif /* MEMCC_BLOCK_IMPLEMENTATION */
