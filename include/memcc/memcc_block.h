@@ -1,8 +1,8 @@
 /* ================================================================================ */
 /*  DEFINITION                                                                      */
 /* ================================================================================ */
-#ifndef MEMCC_STACK_H
-#define MEMCC_STACK_H
+#ifndef MEMCC_BLOCK_H
+#define MEMCC_BLOCK_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -94,12 +94,13 @@ typedef struct memcc_vsblock {
 }
 #endif
 
-#endif /* MEMCC_STACK_H */
+#endif /* MEMCC_BLOCK_H */
 
 
 /* ================================================================================ */
 /*  IMPLEMENTATION                                                                  */
 /* ================================================================================ */
+#define MEMCC_BLOCK_IMPLEMENTATION
 #ifdef MEMCC_BLOCK_IMPLEMENTATION
 
 #ifdef __cplusplus
@@ -173,7 +174,7 @@ void memcc_teardown_sbblock_tu(memcc_sbblock_t *sbblock) {
 }
 
 uint32_t memcc_sbblock_alloc_ts(memcc_sbblock_t *sbblock) {
-    MEMCC_CHECK(sbblock, /*void*/);
+    MEMCC_CHECK(sbblock, UINT32_MAX);
 
     uint8_t *bitmap = sbblock->pool - sbblock->bitmap_size;
 
@@ -238,7 +239,7 @@ void memcc_sbblock_free_ts(memcc_sbblock_t *sbblock, uint32_t idx) {
     bitmap[idx_byte] &= ~(1 << idx_bit); // mark block free
 }
 void memcc_sbblock_free_run_tu(memcc_sbblock_t *sbblock, uint32_t idx, uint32_t count) {
-    MEMCC_CHECK(sbblock && idx + count <= sbblock->block_num, UINT32_MAX);
+    MEMCC_CHECK(sbblock && idx + count <= sbblock->block_num,  /*void*/);
 
     uint8_t *bitmap = sbblock->pool - sbblock->bitmap_size;
 
