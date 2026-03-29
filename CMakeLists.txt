@@ -9,18 +9,63 @@ project(memcc
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # INTERFACE library (header-only)
-add_library(memcc INTERFACE)
+add_library(memcc INTERFACE
+)
 add_library(memcc::memcc ALIAS memcc)
+
+# Set version properties
+set_target_properties(
+    memcc PROPERTIES
+        VERSION     ${PROJECT_VERSION}
+        SOVERSION   ${PROJECT_VERSION_MAJOR}
+)
+
+
+# C standard
+target_compile_features(memcc INTERFACE c_std_11)
 
 # Include directories
 target_include_directories(memcc
     INTERFACE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
-# C standard
-target_compile_features(memcc INTERFACE c_std_11)
+# ---- Install configuration ----
+include(GNUInstallDirs)
+
+install(
+    TARGETS memcc
+    EXPORT memccTargets
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+
+install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+# ---- CMake package config ----
+include(CMakePackageConfigHelpers)
+
+write_basic_package_version_file(
+    "memccConfigVersion.cmake"
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+configure_package_config_file(
+    "${CMAKE_CURRENT_LIST_DIR}/cmake/memccConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/memccConfig.cmake"
+    INSTALL_DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/cmake/memcc
+)
+
+install(
+    EXPORT memccTargets
+    FILE memccTargets.cmake
+    NAMESPACE memcc::
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/cmake/memcc
+)
 
 if(memcc_BUILD_TESTS)
     add_subdirectory(tests)
